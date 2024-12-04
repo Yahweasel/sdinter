@@ -1,0 +1,10 @@
+This is an interactive frontend for stable-diffusion.cpp . You must have a
+working build of stable-diffusion.cpp in (or symlinked to) the directory
+stable-diffusion.cpp. Then just make. Or change some options. Whatever.
+
+Currently using stable-diffusion.cpp version
+b5f493269609fd7e52db56cbb7e757ebf549bc20
+
+For my configuration, I had to compile stable-diffusion and this with
+HSA_OVERRIDE_GFX_VERSION=11.0.0 , including during cmake. Obviously, your
+configuration will vary.
