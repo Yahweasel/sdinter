@@ -10,7 +10,11 @@ CXXFLAGS=$(OFLAGS) \
 all: sdinter
 
 sdinter: sdinter.o
-	$(CXX) $(CXXFLAGS) -o $@ $< $(SDB)/libstable-diffusion.a $(SDB)/ggml/src/libggml.a \
+	$(CXX) $(CXXFLAGS) -o $@ $< \
+		$(SDB)/libstable-diffusion.a \
+		$(SDB)/ggml/src/libggml.a \
+		$(SDB)/ggml/src/*/libggml*.a \
+		$(SDB)/ggml/src/libggml-base.a \
 		-lomp -lhipblas -lrocblas -lamdhip64
 
 %.o: %.cpp

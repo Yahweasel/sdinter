@@ -115,6 +115,7 @@ struct SDParams {
     std::string lora_model_dir;
     std::string output_path = "output.png";
     std::string input_path;
+    std::string mask_path;
     std::string control_image_path;
 
     std::string prompt;
@@ -178,6 +179,7 @@ void print_params(SDParams params) {
     printf("    normalize input image :  %s\n", params.normalize_input ? "true" : "false");
     printf("    output_path:       %s\n", params.output_path.c_str());
     printf("    init_img:          %s\n", params.input_path.c_str());
+    printf("    mask_img:          %s\n", params.mask_path.c_str());
     printf("    control_image:     %s\n", params.control_image_path.c_str());
     printf("    clip on cpu:       %s\n", params.clip_on_cpu ? "true" : "false");
     printf("    controlnet cpu:    %s\n", params.control_net_cpu ? "true" : "false");
@@ -226,7 +228,7 @@ void print_usage(int argc, const char* argv[]) {
     printf("  --normalize-input                  normalize PHOTOMAKER input id images\n");
     printf("  --upscale-model [ESRGAN_PATH]      path to esrgan model. Upscale images after generate, just RealESRGAN_x4plus_anime_6B supported by now\n");
     printf("  --upscale-repeats                  Run the ESRGAN upscaler this many times (default 1)\n");
-    printf("  --type [TYPE]                      weight type (f32, f16, q4_0, q4_1, q5_0, q5_1, q8_0, q2_k, q3_k, q4_k)\n");
+    printf("  --type [TYPE]                      weight type (examples: f32, f16, q4_0, q4_1, q5_0, q5_1, q8_0, q2_K, q3_K, q4_K)\n");
     printf("                                     If not specified, the default is the type of the weight file\n");
     printf("  --lora-model-dir [DIR]             lora model directory\n");
     printf("  -i, --init-img [IMAGE]             path to the input image, required by img2img\n");
@@ -238,9 +240,9 @@ void print_usage(int argc, const char* argv[]) {
     printf("  --guidance SCALE                   guidance scale: (default 3.5)\n");
     printf("  --slg-scale SCALE                  skip layer guidance (SLG) scale, only for DiT models: (default: 0)\n");
     printf("                                     0 means disabled, a value of 2.5 is nice for sd3.5 medium\n");
-    printf("  --skip_layers LAYERS               Layers to skip for SLG steps: (default: [7,8,9])\n");
-    printf("  --skip_layer_start START           SLG enabling point: (default: 0.01)\n");
-    printf("  --skip_layer_end END               SLG disabling point: (default: 0.2)\n");
+    printf("  --skip-layers LAYERS               Layers to skip for SLG steps: (default: [7,8,9])\n");
+    printf("  --skip-layer-start START           SLG enabling point: (default: 0.01)\n");
+    printf("  --skip-layer-end END               SLG disabling point: (default: 0.2)\n");
     printf("                                     SLG will be enabled at step int([STEPS]*[START]) and disabled at int([STEPS]*[END])\n");
     printf("  --strength STRENGTH                strength for noising/unnoising (default: 0.75)\n");
     printf("  --style-ratio STYLE-RATIO          strength for keeping input identity (default: 20%%)\n");
@@ -503,30 +505,30 @@ int main(int argc, const char* argv[]) {
                 invalid_arg = true;
                 break;
             }
-            std::string type = argv[i];
-            if (type == "f32") {
-                params.wtype = SD_TYPE_F32;
-            } else if (type == "f16") {
-                params.wtype = SD_TYPE_F16;
-            } else if (type == "q4_0") {
-                params.wtype = SD_TYPE_Q4_0;
-            } else if (type == "q4_1") {
-                params.wtype = SD_TYPE_Q4_1;
-            } else if (type == "q5_0") {
-                params.wtype = SD_TYPE_Q5_0;
-            } else if (type == "q5_1") {
-                params.wtype = SD_TYPE_Q5_1;
-            } else if (type == "q8_0") {
-                params.wtype = SD_TYPE_Q8_0;
-            } else if (type == "q2_k") {
-                params.wtype = SD_TYPE_Q2_K;
-            } else if (type == "q3_k") {
-                params.wtype = SD_TYPE_Q3_K;
-            } else if (type == "q4_k") {
-                params.wtype = SD_TYPE_Q4_K;
-            } else {
-                fprintf(stderr, "error: invalid weight format %s, must be one of [f32, f16, q4_0, q4_1, q5_0, q5_1, q8_0, q2_k, q3_k, q4_k]\n",
-                        type.c_str());
+            std::string type        = argv[i];
+            bool found              = false;
+            std::string valid_types = "";
+            for (size_t i = 0; i < SD_TYPE_COUNT; i++) {
+                auto trait = ggml_get_type_traits((ggml_type)i);
+                std::string name(trait->type_name);
+                if (name == "f32" || trait->to_float && trait->type_size) {
+                    if (i)
+                        valid_types += ", ";
+                    valid_types += name;
+                    if (type == name) {
+                        if (ggml_quantize_requires_imatrix((ggml_type)i)) {
+                            printf("\033[35;1m[WARNING]\033[0m: type %s requires imatrix to work properly. A dummy imatrix will be used, expect poor quality.\n", trait->type_name);
+                        }
+                        params.wtype = (enum sd_type_t)i;
+                        found        = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
+                fprintf(stderr, "error: invalid weight format %s, must be one of [%s]\n",
+                        type.c_str(),
+                        valid_types.c_str());
                 exit(1);
             }
         } else if (arg == "--lora-model-dir") {
@@ -541,6 +543,12 @@ int main(int argc, const char* argv[]) {
                 break;
             }
             params.input_path = argv[i];
+        } else if (arg == "--mask") {
+            if (++i >= argc) {
+                invalid_arg = true;
+                break;
+            }
+            params.mask_path = argv[i];
         } else if (arg == "--control-image") {
             if (++i >= argc) {
                 invalid_arg = true;
@@ -911,6 +919,8 @@ int perform_op(SDParams &params) {
     bool vae_decode_only          = true;
     uint8_t* input_image_buffer   = NULL;
     uint8_t* control_image_buffer = NULL;
+    uint8_t* mask_image_buffer    = NULL;
+
     if (params.mode == IMG2IMG || params.mode == IMG2VID) {
         vae_decode_only = false;
 
@@ -1018,6 +1028,18 @@ int perform_op(SDParams &params) {
         }
     }
 
+    if (params.mask_path != "") {
+        int c             = 0;
+        mask_image_buffer = stbi_load(params.mask_path.c_str(), &params.width, &params.height, &c, 1);
+    } else {
+        std::vector<uint8_t> arr(params.width * params.height, 255);
+        mask_image_buffer = arr.data();
+    }
+    sd_image_t mask_image = {(uint32_t)params.width,
+                             (uint32_t)params.height,
+                             1,
+                             mask_image_buffer};
+
     sd_image_t* results;
     if (params.mode == TXT2IMG) {
         results = txt2img(sd_ctx,
@@ -1037,7 +1059,8 @@ int perform_op(SDParams &params) {
                           params.style_ratio,
                           params.normalize_input,
                           params.input_id_images_path.c_str(),
-                          params.skip_layers,
+                          params.skip_layers.data(),
+                          params.skip_layers.size(),
                           params.slg_scale,
                           params.skip_layer_start,
                           params.skip_layer_end);
@@ -1086,6 +1109,7 @@ int perform_op(SDParams &params) {
         } else {
             results = img2img(sd_ctx,
                               input_image,
+                              mask_image,
                               params.prompt.c_str(),
                               params.negative_prompt.c_str(),
                               params.clip_skip,
@@ -1102,7 +1126,12 @@ int perform_op(SDParams &params) {
                               params.control_strength,
                               params.style_ratio,
                               params.normalize_input,
-                              params.input_id_images_path.c_str());
+                              params.input_id_images_path.c_str(),
+                              params.skip_layers.data(),
+                              params.skip_layers.size(),
+                              params.slg_scale,
+                              params.skip_layer_start,
+                              params.skip_layer_end);
         }
     }
 
@@ -1116,8 +1145,7 @@ int perform_op(SDParams &params) {
     int upscale_factor = 4;  // unused for RealESRGAN_x4plus_anime_6B.pth
     if (params.esrgan_path.size() > 0 && params.upscale_repeats > 0) {
         upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(params.esrgan_path.c_str(),
-                                                        params.n_threads,
-                                                        params.wtype);
+                                                        params.n_threads);
 
         if (upscaler_ctx == NULL) {
             printf("new_upscaler_ctx failed\n");
