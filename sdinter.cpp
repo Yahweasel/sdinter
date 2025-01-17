@@ -830,6 +830,15 @@ int main(int argc, const char* argv[]) {
                         params.height = round(x * h / 64) * 64;
                         std::cout << "Chose " << params.width << "x" << params.height << std::endl;
 
+                    } else if (cmd == "ratio") {
+                        std::istringstream ss{arg};
+                        double w, h;
+                        ss >> w >> h;
+                        double x = sqrt((1024.0*1024.0) / (w*h));
+                        params.width = round(x * w / 64) * 64;
+                        params.height = round(x * h / 64) * 64;
+                        std::cout << "Chose " << params.width << "x" << params.height << std::endl;
+
                     } else if (cmd == "neg" || cmd == "negative-prompt") {
                         params.negative_prompt = arg;
 
